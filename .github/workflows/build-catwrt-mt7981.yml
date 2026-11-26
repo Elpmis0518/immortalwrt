@@ -1,0 +1,103 @@
+name: Build CatWrt Layer on ImmortalWrt 25.12 (MT7981)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag_prefix:
+        description: 'Release tag prefix'
+        required: false
+        default: 'CatWrt-ImmortalWrt-25.12-MT7981'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build MT7981 (AX3000T + TR3000-256M)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout ImmortalWrt 25.12
+        uses: actions/checkout@v4
+
+      - name: Free disk space & install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force || true
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gcc-multilib \
+            g++-multilib gettext genisoimage git gperf haveged help2man intltool \
+            lib32gcc-s1 libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev libreadline-dev \
+            libssl-dev libtool llvm lrzsz msmtp ninja-build p7zip p7zip-full patch pkgconf \
+            python3 python3-pyelftools python3-setuptools qemu-utils rsync scons \
+            squashfs-tools subversion swig texinfo uglifyjs unzip vim wget xmlto xxd \
+            zlib1g-dev zstd file
+          sudo apt-get clean
+          df -h
+
+      - name: Update & install feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Apply CatWrt customization layer
+        run: bash catwrt/apply-catwrt.sh
+
+      - name: Load MT7981 config & verify stack
+        run: |
+          cp catwrt/mt7981.config .config
+          make defconfig
+          echo "=== Resolved target & core stack ==="
+          grep -E "^CONFIG_TARGET_DEVICE_mediatek_filogic_|^CONFIG_PACKAGE_(firewall4|firewall=|nftables|luci-theme-argon|default-settings-chn|luci-app-)" .config | sort
+
+      - name: Download sources
+        run: |
+          make download -j8
+          find dl -size -1024c -exec ls -l {} \; -exec rm -f {} \;
+
+      - name: Compile firmware
+        run: |
+          echo "Compiling with $(nproc) threads..."
+          make -j$(nproc) || make -j1 V=s
+          df -h
+
+      - name: Prepare & verify release outputs
+        id: prep
+        run: |
+          OUT_DIR="release_files"
+          mkdir -p "$OUT_DIR"
+          cp -v bin/targets/mediatek/filogic/*ax3000t* "$OUT_DIR/"
+          cp -v bin/targets/mediatek/filogic/*tr3000-256mb* "$OUT_DIR/"
+          cp -v bin/targets/mediatek/filogic/sha256sums "$OUT_DIR/" || true
+          ls -lh "$OUT_DIR/"
+          test -n "$(find "$OUT_DIR" -name '*ax3000t*sysupgrade.bin')"
+          test -n "$(find "$OUT_DIR" -name '*ax3000t-ubootmod*sysupgrade.itb')"
+          test -n "$(find "$OUT_DIR" -name '*tr3000-256mb*sysupgrade.bin')"
+          TAG="${{ github.event.inputs.release_tag_prefix || 'CatWrt-ImmortalWrt-25.12-MT7981' }}-$(date -u +'%Y.%m.%d-%H%M')"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.prep.outputs.tag }}
+          path: release_files/
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prep.outputs.tag }}
+          name: ${{ steps.prep.outputs.tag }}
+          body: |
+            **Base**: `immortalwrt/immortalwrt@openwrt-25.12` (Kernel 6.12 · Native LuCI2 + nftables + firewall4 + apk)
+            **Customization Layer**: CatWrt v25.12 (`192.168.1.4`, hostname `CatWrt`, password `password`, Argon + Kami wallpaper, `catnd`, Wi-Fi enabled by default, curated LuCI2+fw4 apps)
+            **Targets**:
+            - `xiaomi_mi-router-ax3000t` (stock layout `sysupgrade.bin`)
+            - `xiaomi_mi-router-ax3000t-ubootmod` (`sysupgrade.itb` + `preloader.bin` + `bl31-uboot.fip` + `initramfs-recovery.itb`)
+            - `cudy_tr3000-256mb-v1` (256MB SPI-NAND `sysupgrade.bin`)
+          files: release_files/*
