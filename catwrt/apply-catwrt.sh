@@ -9,6 +9,11 @@ sed -i 's/192\.168\.1\.1/192.168.1.4/g' "$CFG_GEN"
 sed -i "s/hostname='ImmortalWrt'/hostname='CatWrt'/g" "$CFG_GEN"
 grep -E "192\.168\.1\.4|hostname='CatWrt'" "$CFG_GEN"
 
+# 1b. Safeguard feeds/packages/lang/rust against expired Rust CI LLVM artifacts (404)
+if [ -f feeds/packages/lang/rust/Makefile ]; then
+    sed -i 's/download-ci-llvm=true/download-ci-llvm=false/g' feeds/packages/lang/rust/Makefile
+fi
+
 # 2. Create clean files/ overlay (never breaks upstream git tracking)
 mkdir -p files/etc/uci-defaults \
          files/usr/bin \
