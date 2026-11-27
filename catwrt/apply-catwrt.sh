@@ -181,10 +181,10 @@ if ! uci -q get system.@catwrt_init[0].theme >/dev/null; then
 	UCI
 fi
 
-# CatWrt default root password ('password') only if root password is empty
-if grep -qE '^root::|^root:::' /etc/shadow; then
-	sed -i 's|^root::0:|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:0:|g' /etc/shadow
-	sed -i 's|^root:::0:|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:0:|g' /etc/shadow
+# CatWrt default root password ('password') only if root password is empty (strictly preserve 9 shadow fields)
+if grep -qE '^root::0:0:99999:7:::|^root:::0:99999:7:::' /etc/shadow; then
+	sed -i 's|^root::0:0:99999:7:::|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:0:0:99999:7:::|' /etc/shadow
+	sed -i 's|^root:::0:99999:7:::|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:0:0:99999:7:::|' /etc/shadow
 fi
 
 # Enable Wi-Fi radios by default on first boot (CatWrt behavior)
